@@ -45,6 +45,7 @@
 
 #include <iostream>
 #include <olc_net.h>
+#include <Windows.h>
 
 enum class CustomMsgTypes : uint32_t
 {
