@@ -43,9 +43,11 @@
 	David Barr, aka javidx9, ©OneLoneCoder 2019, 2020
 */
 
-#include <Windows.h>
 #include <iostream>
 #include <olc_net.h>
+
+// must come after any ASIO networking headers
+#include <Windows.h>
 
 enum class CustomMsgTypes : uint32_t
 {
