@@ -43,9 +43,9 @@
 	David Barr, aka javidx9, ©OneLoneCoder 2019, 2020
 */
 
+#include <Windows.h>
 #include <iostream>
 #include <olc_net.h>
-#include <Windows.h>
 
 enum class CustomMsgTypes : uint32_t
 {
@@ -65,8 +65,7 @@ class CustomClient : public olc::net::client_interface<CustomMsgTypes>
         msg.header.id = CustomMsgTypes::ServerPing;
 
         // Caution with this...
-        std::chrono::system_clock::time_point timeNow =
-            std::chrono::system_clock::now();
+        std::chrono::system_clock::time_point timeNow = std::chrono::system_clock::now();
 
         msg << timeNow;
         Send(msg);
@@ -129,11 +128,8 @@ int main()
                         std::chrono::system_clock::now();
                     std::chrono::system_clock::time_point timeThen;
                     msg >> timeThen;
-                    std::cout
-                        << "Ping: "
-                        << std::chrono::duration<double>(timeNow - timeThen)
-                               .count()
-                        << "\n";
+                    std::cout << "Ping: "
+                              << std::chrono::duration<double>(timeNow - timeThen).count() << "\n";
                 }
                 break;
 

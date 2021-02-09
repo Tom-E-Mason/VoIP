@@ -73,11 +73,9 @@ namespace olc
             size_t size() const { return body.size(); }
 
             // Override for std::cout compatibility - produces friendly description of message
-            friend std::ostream& operator<<(std::ostream& os,
-                                            const message<T>& msg)
+            friend std::ostream& operator<<(std::ostream& os, const message<T>& msg)
             {
-                os << "ID:" << int(msg.header.id)
-                   << " Size:" << msg.header.size;
+                os << "ID:" << int(msg.header.id) << " Size:" << msg.header.size;
                 return os;
             }
 
@@ -149,8 +147,7 @@ namespace olc
             message<T> msg;
 
             // Again, a friendly string maker
-            friend std::ostream& operator<<(std::ostream& os,
-                                            const owned_message<T>& msg)
+            friend std::ostream& operator<<(std::ostream& os, const owned_message<T>& msg)
             {
                 os << msg.msg;
                 return os;

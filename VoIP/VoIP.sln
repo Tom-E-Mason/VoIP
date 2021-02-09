@@ -15,6 +15,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VoIP_Server", "VoIP_Server\
 		{5D8CE2A6-716A-46DF-B143-18747EFD20DC} = {5D8CE2A6-716A-46DF-B143-18747EFD20DC}
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{E9CBF817-8D3F-4FCE-85D9-7262BBB825BF}"
+	ProjectSection(SolutionItems) = preProject
+		.clang-format = .clang-format
+		SolutionProps.props = SolutionProps.props
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64

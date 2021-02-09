@@ -53,8 +53,9 @@ namespace olc
 {
     namespace net
     {
-        template<typename T>
-        class connection : public std::enable_shared_from_this<connection<T>>
+        template<typename T> class server_interface;
+
+        template<typename T> class connection : public std::enable_shared_from_this<connection<T>>
         {
           public:
             // A connection is "owned" by either a server or a client, and its
@@ -77,6 +78,23 @@ namespace olc
                   m_qMessagesIn(qIn)
             {
                 m_nOwnerType = parent;
+
+                // Construct validation check data
+                if (m_nOwnerType == owner::server)
+                {
+                    // Connection is Server -> Client, construct random data for
+                    // the client to transform and send back for validation
+                    m_nHandshakeOut =
+                        uint64_t(std::chrono::system_clock::now().time_since_epoch().count());
+
+                    m_nHandshakeCheck = scramble(m_nHandshakeOut);
+                }
+                else
+                {
+                    // Connection is Client -> Server, so we have nothing to define
+                    m_nHandshakeIn = 0;
+                    m_nHandshakeOut = 0;
+                }
             }
 
             virtual ~connection() {}
@@ -86,20 +104,29 @@ namespace olc
             uint32_t GetID() const { return id; }
 
           public:
-            void ConnectToClient(uint32_t uid = 0)
+            void ConnectToClient(olc::net::server_interface<T>* server, uint32_t uid = 0)
             {
                 if (m_nOwnerType == owner::server)
                 {
                     if (m_socket.is_open())
                     {
                         id = uid;
-                        ReadHeader();
+                        // Was: ReadHeader();
+
+                        // A client has attempted to connect to the server, but
+                        // we wish the client to first validate itself, so first
+                        // write out the handshake data to be validated
+                        WriteValidation();
+
+                        // Next, issue a task to sit and wait asynchronously for
+                        // precisely the validation data sent back from the
+                        // client
+                        ReadValidation(server);
                     }
                 }
             }
 
-            void ConnectToServer(
-                const asio::ip::tcp::resolver::results_type& endpoints)
+            void ConnectToServer(const asio::ip::tcp::resolver::results_type& endpoints)
             {
                 // Only clients can connect to servers
                 if (m_nOwnerType == owner::client)
@@ -108,11 +135,14 @@ namespace olc
                     asio::async_connect(
                         m_socket,
                         endpoints,
-                        [this](std::error_code ec,
-                               asio::ip::tcp::endpoint endpoint) {
+                        [this](std::error_code ec, asio::ip::tcp::endpoint endpoint) {
                             if (!ec)
                             {
-                                ReadHeader();
+                                // Was ReadHeader();
+
+                                // First thing server will do is send packet to
+                                // be validated so wait for that and respond
+                                ReadValidation();
                             }
                         });
                 }
@@ -158,8 +188,7 @@ namespace olc
                 // the message, and issue the work - asio, send these bytes
                 asio::async_write(
                     m_socket,
-                    asio::buffer(&m_qMessagesOut.front().header,
-                                 sizeof(message_header<T>)),
+                    asio::buffer(&m_qMessagesOut.front().header, sizeof(message_header<T>)),
                     [this](std::error_code ec, std::size_t length) {
                         // asio has now sent the bytes - if there was a problem
                         // an error would be available...
@@ -204,31 +233,30 @@ namespace olc
                 // If this function is called, a header has just been sent, and that header
                 // indicated a body existed for this message. Fill a transmission buffer
                 // with the body data, and send it!
-                asio::async_write(
-                    m_socket,
-                    asio::buffer(m_qMessagesOut.front().body.data(),
-                                 m_qMessagesOut.front().body.size()),
-                    [this](std::error_code ec, std::size_t length) {
-                        if (!ec)
-                        {
-                            // Sending was successful, so we are done with the message
-                            // and remove it from the queue
-                            m_qMessagesOut.pop_front();
+                asio::async_write(m_socket,
+                                  asio::buffer(m_qMessagesOut.front().body.data(),
+                                               m_qMessagesOut.front().body.size()),
+                                  [this](std::error_code ec, std::size_t length) {
+                                      if (!ec)
+                                      {
+                                          // Sending was successful, so we are done with the message
+                                          // and remove it from the queue
+                                          m_qMessagesOut.pop_front();
 
-                            // If the queue still has messages in it, then issue the task to
-                            // send the next messages' header.
-                            if (!m_qMessagesOut.empty())
-                            {
-                                WriteHeader();
-                            }
-                        }
-                        else
-                        {
-                            // Sending failed, see WriteHeader() equivalent for description :P
-                            std::cout << "[" << id << "] Write Body Fail.\n";
-                            m_socket.close();
-                        }
-                    });
+                                          // If the queue still has messages in it, then issue the task to
+                                          // send the next messages' header.
+                                          if (!m_qMessagesOut.empty())
+                                          {
+                                              WriteHeader();
+                                          }
+                                      }
+                                      else
+                                      {
+                                          // Sending failed, see WriteHeader() equivalent for description :P
+                                          std::cout << "[" << id << "] Write Body Fail.\n";
+                                          m_socket.close();
+                                      }
+                                  });
             }
 
             // ASYNC - Prime context ready to read a message header
@@ -241,8 +269,7 @@ namespace olc
                 // convenient to work with.
                 asio::async_read(
                     m_socket,
-                    asio::buffer(&m_msgTemporaryIn.header,
-                                 sizeof(message_header<T>)),
+                    asio::buffer(&m_msgTemporaryIn.header, sizeof(message_header<T>)),
                     [this](std::error_code ec, std::size_t length) {
                         if (!ec)
                         {
@@ -252,8 +279,7 @@ namespace olc
                             {
                                 // ...it does, so allocate enough space in the messages' body
                                 // vector, and issue asio with the task to read the body.
-                                m_msgTemporaryIn.body.resize(
-                                    m_msgTemporaryIn.header.size);
+                                m_msgTemporaryIn.body.resize(m_msgTemporaryIn.header.size);
                                 ReadBody();
                             }
                             else
@@ -281,8 +307,7 @@ namespace olc
                 // in the temporary message object, so just wait for the bytes to arrive...
                 asio::async_read(
                     m_socket,
-                    asio::buffer(m_msgTemporaryIn.body.data(),
-                                 m_msgTemporaryIn.body.size()),
+                    asio::buffer(m_msgTemporaryIn.body.data(), m_msgTemporaryIn.body.size()),
                     [this](std::error_code ec, std::size_t length) {
                         if (!ec)
                         {
@@ -305,15 +330,84 @@ namespace olc
                 // Shove it in queue, converting it to an "owned message", by initialising
                 // with the a shared pointer from this connection object
                 if (m_nOwnerType == owner::server)
-                    m_qMessagesIn.push_back(
-                        { this->shared_from_this(), m_msgTemporaryIn });
+                    m_qMessagesIn.push_back({ this->shared_from_this(), m_msgTemporaryIn });
                 else
                     m_qMessagesIn.push_back({ nullptr, m_msgTemporaryIn });
 
                 // We must now prime the asio context to receive the next message. It
-                // wil just sit and wait for bytes to arrive, and the message construction
+                // will just sit and wait for bytes to arrive, and the message construction
                 // process repeats itself. Clever huh?
                 ReadHeader();
+            }
+
+            // "Encrypt" data
+            uint64_t scramble(uint64_t nInput)
+            {
+                uint64_t out = nInput ^ 0xDEADBEEFC0DECAFE;
+                out = (out & 0xF0F0F0F0F0F0F0) >> 4 | (out & 0x0F0F0F0F0F0F0F) << 4;
+                return out ^ 0xC0DEFACE12345678;
+            }
+
+            // ASYNC - Used by both client and server to write validation packet
+            void WriteValidation()
+            {
+                asio::async_write(m_socket,
+                                  asio::buffer(&m_nHandshakeOut, sizeof(uint64_t)),
+                                  [this](std::error_code ec, std::size_t length) {
+                                      if (!ec)
+                                      {
+                                          // Validation data sent, clients should sit and wait
+                                          // for a response (or a closure)
+                                          if (m_nOwnerType == owner::client)
+                                              ReadHeader();
+                                      }
+                                      else
+                                          m_socket.close();
+                                  });
+            }
+
+            void ReadValidation(olc::net::server_interface<T>* server = nullptr)
+            {
+                asio::async_read(
+                    m_socket,
+                    asio::buffer(&m_nHandshakeIn, sizeof(uint64_t)),
+                    [this, server](std::error_code ec, std::size_t length) {
+                        if (!ec)
+                        {
+                            if (m_nOwnerType == owner::server)
+                            {
+                                if (m_nHandshakeIn == m_nHandshakeCheck)
+                                {
+                                    // Client has provided a valid solution, so allow it to connect properly
+                                    std::cout << "Client Validated" << std::endl;
+                                    server->OnClientValidated(this->shared_from_this());
+
+                                    // Sit waiting to receive data now
+                                    ReadHeader();
+                                }
+                                else
+                                {
+                                    // Client gave incorrect data, so disconnect
+                                    std::cout << "Client Disconnected (Fail Validation)\n";
+                                    m_socket.close();
+                                }
+                            }
+                            else
+                            {
+                                // Connection is a client, so solve puzzle
+                                m_nHandshakeOut = scramble(m_nHandshakeIn);
+
+                                // Write the result
+                                WriteValidation();
+                            }
+                        }
+                        else
+                        {
+                            // Some bigger failure occured
+                            std::cout << "Client Disconnected (ReadValidation)\n";
+                            m_socket.close();
+                        }
+                    });
             }
 
           protected:
@@ -336,8 +430,11 @@ namespace olc
 
             // The "owner" decides how some of the connection behaves
             owner m_nOwnerType = owner::server;
-
             uint32_t id = 0;
+
+            uint64_t m_nHandshakeOut = 0;
+            uint64_t m_nHandshakeIn = 0;
+            uint64_t m_nHandshakeCheck = 0;
         };
     } // namespace net
 } // namespace olc
